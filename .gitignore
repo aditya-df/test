@@ -88,3 +88,5 @@ next-env.d.ts
 bun.lock
 pnpm-lock.yaml
 certificates
+
+/prisma/schema.prisma
