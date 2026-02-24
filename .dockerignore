@@ -1,0 +1,9 @@
+Dockerfile
+.env.local
+.env.development
+.env.production
+node_modules
+.git
+.gitignore
+README.md
+.dockerignore

@@ -1,0 +1,228 @@
+// Sanitize messages before storing to DB/Redis:
+// - Merge assistant and tool messages into a single assistant message
+// - Convert tool-call/result parts into tool-invocation parts (v4 style)
+// - Prepend step-start to all tool invocations
+// - Strip providerOptions from ALL parts
+// - Limit reasoning steps to first 10 + final answer
+// - Remove duplicate consecutive text parts
+function sanitizeMessagesForStorage(messages: any[]): any[] {
+  const result: any[] = [];
+  const normalized = normalizeMessagesToParts(messages);
+
+  // Map all tool results by toolCallId for easier merging
+  const toolResults = new Map<string, any>();
+  normalized.forEach((msg) => {
+    if (msg.role === "tool") {
+      (msg.parts || []).forEach((part: any) => {
+        const id = part.toolCallId;
+        if (id) {
+          toolResults.set(id, part);
+        }
+      });
+    }
+  });
+
+  const isBigQueryTool = (toolName: string, res: any, args: any) => {
+    const name = toolName?.toLowerCase() || "";
+    return !!(
+      name.includes("bigquery") ||
+      name.includes("inventory_details") ||
+      name.includes("knowledge") ||
+      name.includes("embedding") ||
+      name.includes("research") ||
+      name.includes("search_kb") ||
+      res?.originalSqlCommand ||
+      args?.sqlCommand ||
+      res?.executedQuery ||
+      args?.executedQuery
+    );
+  };
+
+  for (let i = 0; i < normalized.length; i++) {
+    const message = normalized[i];
+
+    if (message.role === "tool") {
+      continue; // Skip tool messages, they are handled via the map
+    }
+
+    if (message.role === "user") {
+      const cleanedParts = (message.parts || []).map(
+        ({ providerOptions, ...rest }: any) => rest,
+      );
+      result.push({ ...message, parts: cleanedParts });
+      continue;
+    }
+
+    if (message.role === "assistant") {
+      let mergedParts = [...(message.parts || [])];
+
+      // Merge subsequent assistant messages into this one
+      let j = i + 1;
+      while (j < normalized.length) {
+        const nextMsg = normalized[j];
+        if (nextMsg.role === "assistant") {
+          mergedParts = [...mergedParts, ...(nextMsg.parts || [])];
+          j++;
+        } else if (nextMsg.role === "tool") {
+          j++; // Skip tool messages here too
+        } else {
+          break;
+        }
+      }
+      i = j - 1;
+
+      let toolCount = 0;
+      const finalParts: any[] = [];
+      const seenTexts = new Set<string>();
+
+      mergedParts.forEach((part: any) => {
+        let finalPart = { ...part };
+        const toolCallId =
+          finalPart.toolCallId || finalPart.toolInvocation?.toolCallId;
+
+        // 1. Check if this part has a result in our map
+        if (toolCallId && toolResults.has(toolCallId)) {
+          const resultPart = toolResults.get(toolCallId);
+          const toolName =
+            resultPart.toolName ||
+            finalPart.toolName ||
+            finalPart.type?.replace("tool-", "") ||
+            finalPart.toolInvocation?.toolName ||
+            "unknown";
+          const args =
+            resultPart.args ||
+            finalPart.args ||
+            finalPart.input ||
+            finalPart.toolInvocation?.args ||
+            {};
+          const res =
+            resultPart.result ||
+            resultPart.output ||
+            resultPart.content ||
+            finalPart.output ||
+            finalPart.result;
+
+          const isBigQuery = isBigQueryTool(toolName, res, args);
+
+          finalPart = {
+            type: "tool-invocation",
+            isBigQuery,
+            toolInvocation: {
+              toolCallId,
+              toolName,
+              args,
+              state: "result",
+              result: res,
+              step: toolCount++,
+              isBigQuery,
+            },
+          };
+        }
+        // 2. Handle parts that are already results or invocations
+        else if (
+          finalPart.type === "tool-invocation" ||
+          finalPart.type === "tool-result" ||
+          (finalPart.type?.startsWith("tool-") &&
+            (finalPart.state === "output-available" || finalPart.output))
+        ) {
+          const toolName =
+            finalPart.toolName ||
+            finalPart.type?.replace("tool-", "") ||
+            finalPart.toolInvocation?.toolName ||
+            "unknown";
+          const args =
+            finalPart.args ||
+            finalPart.input ||
+            finalPart.toolInvocation?.args ||
+            {};
+          const res =
+            finalPart.result ||
+            finalPart.output ||
+            finalPart.content ||
+            finalPart.toolInvocation?.result;
+
+          const isBigQuery = isBigQueryTool(toolName, res, args);
+
+          finalPart = {
+            type: "tool-invocation",
+            isBigQuery,
+            toolInvocation: {
+              toolCallId: toolCallId || "unknown",
+              toolName,
+              args,
+              state: "result",
+              result: res,
+              step: toolCount++,
+              isBigQuery,
+            },
+          };
+        }
+        // 3. Handle remaining tool calls (state: call)
+        else if (
+          finalPart.type === "tool-call" ||
+          (finalPart.type?.startsWith("tool-") &&
+            finalPart.type !== "tool-invocation")
+        ) {
+          const toolName =
+            finalPart.toolName || finalPart.type.replace("tool-", "");
+
+          // Limit reasoning steps
+          if (toolName === "addReasoningStep") {
+            const reasoningSteps = mergedParts.filter(
+              (p) =>
+                p.type === "tool-addReasoningStep" ||
+                (p.type === "tool-invocation" &&
+                  p.toolInvocation?.toolName === "addReasoningStep"),
+            );
+            const currentReasoningIndex = reasoningSteps.findIndex(
+              (p) => p === part,
+            );
+            const isFinalStep =
+              finalPart.input?.nextStep === "finalAnswer" ||
+              finalPart.output?.nextStep === "finalAnswer";
+
+            if (currentReasoningIndex >= 10 && !isFinalStep) return;
+          }
+
+          const isBigQuery = isBigQueryTool(toolName, null, finalPart.input);
+
+          finalPart = {
+            type: "tool-invocation",
+            isBigQuery,
+            toolInvocation: {
+              toolCallId: toolCallId || "unknown",
+              toolName,
+              args: finalPart.input || finalPart.args || {},
+              state: "call",
+              step: toolCount++,
+              isBigQuery,
+            },
+          };
+        }
+        // 4. Handle text parts with deduplication
+        else if (finalPart.type === "text") {
+          if (seenTexts.has(finalPart.text)) return;
+          seenTexts.add(finalPart.text);
+        }
+        // 5. Skip step-start (we'll re-add it)
+        else if (finalPart.type === "step-start") {
+          return;
+        }
+
+        // Add step-start before tool-invocation
+        if (finalPart.type === "tool-invocation") {
+          finalParts.push({ type: "step-start" });
+        }
+        finalParts.push(finalPart);
+      });
+
+      const cleanedParts = finalParts.map(
+        ({ providerOptions, ...rest }: any) => rest,
+      );
+      if (cleanedParts.length > 0) {
+        result.push({ ...message, parts: cleanedParts });
+      }
+    }
+  }
+  return result;
+}

@@ -1,0 +1,160 @@
+limit_req_zone $binary_remote_addr zone=mylimit:10m rate=10r/s;
+
+upstream nextjs {
+    server localhost:3001;
+}
+
+upstream trial_nextjs {
+    server localhost:3002;
+}
+
+upstream fastapi {
+    server localhost:8080;
+}
+
+upstream portainer {
+    server localhost:9443;
+}
+
+
+server {
+    server_name knowgen-ai-dev.metrodata.web.id;
+    root /srv/public;
+    server_tokens off;
+
+    client_max_body_size 200M;
+    proxy_max_temp_file_size 0;
+    chunked_transfer_encoding on;
+
+    location /portainer/ {
+        proxy_http_version 1.1;
+        proxy_read_timeout 24h;
+        
+        # Rate limiting
+        limit_req zone=mylimit burst=20 nodelay;
+        
+        # Headers
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto https;
+        proxy_set_header X-Forwarded-Ssl on;
+        proxy_set_header Host $http_host;
+        proxy_set_header X-Real-IP $remote_addr;
+        
+        # WebSocket support
+        proxy_set_header Upgrade $http_upgrade;
+        proxy_set_header Connection 'upgrade';
+        
+        # Disable buffering for streaming responses
+        proxy_buffering off;
+        
+        # Pass to Portainer backend
+        proxy_pass https://portainer/;
+    }
+
+    location /key {
+        proxy_http_version 1.1;
+        proxy_read_timeout 24h;
+        
+        # Rate limiting
+        limit_req zone=mylimit burst=20 nodelay;
+        
+        # Headers for trial app
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_set_header X-Forwarded-Host $host;
+        proxy_set_header X-Forwarded-Port 443;
+        
+        # WebSocket support for Next.js dev mode
+        proxy_set_header Upgrade $http_upgrade;
+        proxy_set_header Connection 'upgrade';
+        
+        # Disable buffering for streaming responses
+        proxy_buffering off;
+        proxy_cache off;
+        proxy_redirect off;
+        
+        # Pass to trial Next.js app
+        proxy_pass http://trial_nextjs;
+        
+        # Handle trailing slashes
+        proxy_cookie_path / "/; HTTPOnly; Secure";
+        proxy_cache_bypass $http_upgrade;
+    }
+
+    location /api/v1 {
+        proxy_http_version 1.1;
+        proxy_read_timeout 24h;
+        
+        # Rate limiting
+        limit_req zone=mylimit burst=20 nodelay;
+        
+        # Headers
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto https;
+        proxy_set_header X-Forwarded-Ssl on;
+        proxy_set_header Host $http_host;
+        proxy_set_header X-Real-IP $remote_addr;
+        
+        # Disable buffering for streaming responses
+        proxy_buffering off;
+        
+        # Pass to the API v1 backend
+        proxy_pass http://fastapi;
+    }
+
+    location / {
+        try_files $uri $uri/ @nextjs;
+    }
+
+    location @nextjs {
+        proxy_cache off;
+        proxy_http_version 1.1;
+        proxy_read_timeout 24h;
+
+        limit_req zone=mylimit burst=20 nodelay;
+
+     
+        proxy_redirect off;
+        proxy_pass http://nextjs;  # Note: Using HTTP here since Nginx handles SSL
+        proxy_cookie_path / "/; HTTPOnly; Secure";
+
+        #proxy_set_header Upgrade $http_upgrade;
+        #proxy_set_header Connection 'upgrade';
+        #proxy_set_header Host $host;
+        #proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        #proxy_set_header X-Forwarded-Proto https;
+        #proxy_set_header X-Forwarded-Ssl on;
+        #proxy_set_header Host $http_host;
+
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_set_header X-Forwarded-Host $host;
+        proxy_set_header X-Forwarded-Port 443;
+
+
+        proxy_cache_bypass $http_upgrade;
+
+        # Disable buffering
+        proxy_buffering off;
+    }
+
+    listen 443 ssl; # managed by Certbot
+    ssl_certificate /etc/letsencrypt/live/knowgen-ai-dev.metrodata.web.id/fullchain.pem; # managed by Certbot
+    ssl_certificate_key /etc/letsencrypt/live/knowgen-ai-dev.metrodata.web.id/privkey.pem; # managed by Certbot
+    include /etc/letsencrypt/options-ssl-nginx.conf; # managed by Certbot
+    ssl_dhparam /etc/letsencrypt/ssl-dhparams.pem; # managed by Certbot
+}
+
+server {
+    if ($host = knowgen-ai-dev.metrodata.web.id) {
+        return 301 https://$host$request_uri;
+    } # managed by Certbot
+
+    listen 80;
+    server_name knowgen-ai-dev.metrodata.web.id;
+    return 404; # managed by Certbot
+}

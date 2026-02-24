@@ -1,0 +1,673 @@
+generator client {
+  provider        = "prisma-client-js"
+  previewFeatures = ["driverAdapters"]
+}
+
+model UserAgent {
+  id        String   @id @default(cuid())
+  userId    String
+  agentId   String
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  agent     Agent    @relation(fields: [agentId], references: [id], onDelete: Cascade)
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  
+  @@unique([userId, agentId])
+  @@index([userId])
+  @@index([agentId])
+}
+
+/// This model is managed by another application
+model ToolScheduleJob {
+  id             String       @id
+  logMessage     String?
+  status         String?
+  isFinish       Boolean      @default(false)
+  createdAt      DateTime     @default(now())
+  updatedAt      DateTime     @updatedAt
+  functionToolId String
+  functionTool   FunctionTool @relation(fields: [functionToolId], references: [id], onDelete: Cascade)
+
+  @@ignore
+}
+
+model Account {
+  id                String  @id @default(cuid())
+  userId            String  @map("user_id")
+  type              String
+  provider          String
+  providerAccountId String  @map("provider_account_id")
+  refresh_token     String?
+  access_token      String?
+  expires_at        Int?
+  token_type        String?
+  scope             String?
+  id_token          String?
+  session_state     String?
+  user              User    @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([provider, providerAccountId])
+  @@map("accounts")
+}
+
+model acl {
+  id        String    @id @default(cuid())
+  menuType  MenuType?
+  role      UserRole? @map("role")
+  create    Boolean?
+  update    Boolean?
+  delete    Boolean?
+  read      Boolean?
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+
+  @@unique([menuType, role])
+  @@map("acls")
+}
+
+model Session {
+  id           String   @id @default(cuid())
+  sessionToken String   @unique @map("session_token")
+  userId       String   @map("user_id")
+  expires      DateTime
+  user         User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("sessions")
+}
+
+model User {
+  id                       String               @id @default(cuid())
+  name                     String?
+  email                    String?              @unique
+  image                    String?
+  passwordHash             String?              @map("password_hash")
+  surname                  String?
+  username                 String?              @unique
+  resetPasswordToken       String?              @unique @map("reset_password_token")
+  resetPasswordTokenExpiry DateTime?            @map("reset_password_token_expiery")
+  createdAt                DateTime             @default(now()) @map("created_at")
+  emailVerificationToken   String?              @unique @map("email_verification_token")
+  emailVerified            DateTime?            @map("email_verified")
+  role                     UserRole[]           @default([admin])
+  address                  String?
+  isVerified               Boolean              @default(true)
+  onboardingCompleted      Boolean              @default(true) @map("onboarding_completed")
+  onboardingGuideCompleted Boolean              @default(true) @map("onboarding_guide_completed")
+  phone                    String?
+  trialEndDate             DateTime?
+  trialStartDate           DateTime?
+  trialToken               String?              @unique
+  userType                 UserType             @default(REGULAR)
+  agent                    Agent[]
+  approvedRequests         ApprovalRequest[]    @relation("ApprovedBy")
+  requestedApprovals       ApprovalRequest[]    @relation("Requester")
+  ChatNewVersion           ChatNewVersion[]
+  FunctionTool             FunctionTool[]
+  SystemSettings           SystemSettings[]
+  themes                   Theme[]
+  agents                   UserAgent[]
+  organization             UserOnOrganization[]
+  userThemes               UserTheme[]
+  accounts                 Account[]
+  auditLogs                AuditLog[]
+  InvitationToken          InvitationToken[]
+  sessions                 Session[]
+
+  @@map("users")
+}
+
+model VerificationToken {
+  identifier String
+  token      String   @unique
+  expires    DateTime
+
+  @@unique([identifier, token])
+  @@map("verification_tokens")
+}
+
+model InvitationToken {
+  email          String
+  organizationId String
+  token          String
+  expires        DateTime
+  createdAt      DateTime     @default(now()) @map("created_at")
+  userId         String?      @map("userId")
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  User           User?        @relation(fields: [userId], references: [id])
+
+  @@unique([email, organizationId])
+  @@map("invitation_tokens")
+}
+
+model NewsletterSubscriber {
+  id        String   @id @default(cuid())
+  email     String   @unique
+  createdAt DateTime @default(now()) @map("created_at")
+
+  @@map("newsletter_subscribers")
+}
+
+model ChatNewVersion {
+  id                   String            @id @default(uuid())
+  createdAt            DateTime          @default(now())
+  messages             Json
+  userId               String
+  agentId              String?
+  completionTokens     Int?
+  messageResponseTimes Json?
+  promptTokens         Int?
+  totalResponseTime    Int?              @default(0)
+  totalTokens          Int?
+  topic                String?
+  isDeleted            Boolean?          @default(false)
+  agent                Agent?            @relation(fields: [agentId], references: [id], onDelete: Cascade)
+  user                 User              @relation(fields: [userId], references: [id], onDelete: Cascade)
+  messageFeedback      MessageFeedback[]
+  auditLogs            AuditLog[]
+
+  @@index([userId, createdAt])
+  @@map("ChatNewVersion")
+}
+
+model MessageFeedback {
+  id             String         @id @default(cuid())
+  userId         String
+  chatId         String
+  messageIndex   Int?
+  messageRole    MessageRole
+  feedbackType   FeedbackType
+  messageContent String?
+  comment        String?
+  createdAt      DateTime       @default(now())
+  updatedAt      DateTime       @updatedAt
+  chat           ChatNewVersion @relation(fields: [chatId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, chatId, messageIndex])
+  @@index([userId])
+  @@index([chatId])
+  @@index([chatId, messageIndex])
+  @@map("message_feedback")
+}
+
+model Organization {
+  id                       String                     @id @default(cuid())
+  name                     String
+  address                  String
+  phone                    String?
+  email                    String?                    @unique
+  createdAt                DateTime                   @default(now())
+  updatedAt                DateTime                   @updatedAt
+  isRoot                   Boolean?                   @default(false)
+  Credentials              Credentials[]
+  datasourceOnOrganization DatasourceOnOrganization[]
+  documentOnOrganization   DocumentOnOrganization[]
+  user                     UserOnOrganization[]
+  invitationToken          InvitationToken[]
+}
+
+model UserOnOrganization {
+  userId         String
+  organizationId String
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  user           User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@id([userId, organizationId])
+}
+
+model LLMModel {
+  id             String   @id @default(cuid())
+  modelName      String?  @unique
+  displayName    String?
+  provider       String?
+  description    String?
+  maxTokens      Int?
+  contextWindow  Int?
+  pricePerToken  Float?
+  isActive       Boolean  @default(true)
+  requiresApiKey Boolean  @default(false)
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+  agents         Agent[]
+
+  @@map("llm_models")
+}
+
+model FunctionTool {
+  id                String            @id @default(cuid())
+  agentId           String?
+  typeId            String?
+  name              String
+  description       String?
+  systemInstruction String
+  parameters        Json
+  executionCode     String?
+  syncStatus        String?
+  createdAt         DateTime          @default(now())
+  updatedAt         DateTime          @updatedAt
+  userId            String?
+  functionName      String?
+  databaseType      String?
+  sqlCommand        String?
+  visibilityType    VisibilityType?   @default(PRIVATE)
+  databaseZone      String?
+  datasetId         String?
+  credentialId      String?
+  requestMethod     String?
+  requestUrl        String?
+  documents         Document[]
+  agent             Agent?            @relation(fields: [agentId], references: [id], onDelete: Cascade)
+  type              Parameters?       @relation(fields: [typeId], references: [id], onDelete: Cascade)
+  user              User?             @relation(fields: [userId], references: [id], onDelete: Cascade)
+  toolScheduleJobs  ToolScheduleJob[] @ignore
+  ToolsOnAgent      ToolsOnAgent[]
+}
+
+model Document {
+  id                     String                   @id @default(cuid())
+  agentId                String?
+  datasourceId           String?
+  fileName               String
+  bucketName             String?
+  description            String?
+  extensionType          String?
+  documentIdGdrive       String?
+  createdAt              DateTime                 @default(now())
+  updatedAt              DateTime                 @updatedAt
+  functionToolId         String?
+  embeddingresult        Unsupported("vector")?
+  rawContent             String?
+  agent                  Agent?                   @relation(fields: [agentId], references: [id], onDelete: Cascade)
+  datasource             Datasource?              @relation(fields: [datasourceId], references: [id], onDelete: Cascade)
+  functionTool           FunctionTool?            @relation(fields: [functionToolId], references: [id], onDelete: Cascade)
+  documentOnOrganization DocumentOnOrganization[]
+}
+
+model DocumentOnOrganization {
+  organizationId String
+  documentId     String
+  document       Document     @relation(fields: [documentId], references: [id], onDelete: Cascade)
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+
+  @@id([documentId, organizationId])
+}
+
+model Datasource {
+  id                       String                     @id @default(cuid())
+  name                     String
+  description              String?
+  status                   String?
+  endpoint                 String?
+  type                     String
+  sourceType               String?
+  port                     String?
+  uploadedAuthUrl          String?
+  createdAt                DateTime                   @default(now())
+  updatedAt                DateTime                   @updatedAt
+  credential               String?
+  databaseBigQuery         String?
+  databasePostgres         String?
+  databaseSqlServer        String?
+  indexElasticsearch       String?
+  password                 String?
+  passwordElasticsearch    String?
+  projectId                String?
+  queryElasticsearch       String?
+  schemaPostgres           String?
+  schemaSqlServer          String?
+  sqlBigQuery              String?
+  sqlPostgres              String?
+  sqlSqlServer             String?
+  username                 String?
+  usernameElasticsearch    String?
+  agent                    Agent[]
+  datasourceOnOrganization DatasourceOnOrganization[]
+  document                 Document[]
+}
+
+model DatasourceOnOrganization {
+  organizationId String
+  datasourceId   String
+  datasource     Datasource   @relation(fields: [datasourceId], references: [id], onDelete: Cascade)
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+
+  @@id([datasourceId, organizationId])
+}
+
+model Agent {
+  id                     String                   @id @default(cuid())
+  userId                 String
+  datasourceId           String?
+  agentName              String
+  description            String?
+  systemInstruction      String
+  syncStatus             String?
+  createdAt              DateTime                 @default(now())
+  updatedAt              DateTime                 @updatedAt
+  token                  String?
+  llmModelId             String?
+  model                  String?
+  temperature            Float?
+  topK                   Int?
+  topP                   Float?
+  image                  String?
+  visibilityType         VisibilityType?          @default(PRIVATE)
+  imageGenerationEnabled Boolean?                 @default(true)
+  phoneNumber            String?
+  datasource             Datasource?              @relation(fields: [datasourceId], references: [id], onDelete: Cascade)
+  llmModel               LLMModel?                @relation(fields: [llmModelId], references: [id])
+  user                   User                     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  ApprovalRequestOnAgent ApprovalRequestOnAgent[]
+  chatNewVersions        ChatNewVersion[]
+  document               Document[]
+  embeddedChats          EmbeddedChat[]
+  functionTools          FunctionTool[]
+  ToolsOnAgent           ToolsOnAgent[]
+  users                  UserAgent[]
+}
+
+model ChatMessage {
+  id               String       @id @default(cuid())
+  createdAt        DateTime     @default(now())
+  embeddedChatId   String
+  role             String
+  content          String
+  tokenCount       Int?
+  promptTokens     Int?
+  completionTokens Int?
+  embeddedChat     EmbeddedChat @relation(fields: [embeddedChatId], references: [id])
+
+  @@index([embeddedChatId])
+  @@index([role])
+  @@index([createdAt])
+}
+
+model EmbeddedChat {
+  id           String        @id @default(cuid())
+  createdAt    DateTime      @default(now())
+  messages     Json
+  agentId      String
+  userId       String?
+  token        String
+  chatMessages ChatMessage[]
+  Agent        Agent         @relation(fields: [agentId], references: [id])
+
+  @@index([agentId])
+  @@index([token])
+}
+
+model ChatNewVersionWebhook {
+  id        String   @id @default(uuid())
+  roomId    String?
+  createdAt DateTime @default(now())
+  messages  Json
+  token     String
+
+  @@map("ChatNewVersionWebhook")
+}
+
+model SystemSettings {
+  id             String   @id @default(uuid())
+  userId         String
+  sessionTimeout Int?     @default(600)
+  warningTime    Int?     @default(30)
+  updatedAt      DateTime @updatedAt
+  user           User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+model Theme {
+  id          String      @id @default(uuid())
+  name        String
+  description String?
+  colors      Json
+  isDefault   Boolean     @default(false)
+  createdAt   DateTime    @default(now())
+  updatedAt   DateTime    @updatedAt
+  userId      String?
+  user        User?       @relation(fields: [userId], references: [id])
+  UserTheme   UserTheme[]
+
+  @@index([userId])
+}
+
+model UserTheme {
+  id        String   @id @default(uuid())
+  userId    String
+  themeId   String
+  isActive  Boolean  @default(true)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  theme     Theme    @relation(fields: [themeId], references: [id], onDelete: Cascade)
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, themeId])
+  @@index([userId])
+  @@index([themeId])
+}
+
+model Parameters {
+  id            String         @id @default(cuid())
+  keyString     String
+  valueString   String?
+  createdAt     DateTime       @default(now())
+  updatedAt     DateTime       @updatedAt
+  functionTools FunctionTool[]
+}
+
+model Credentials {
+  id              String       @id @default(cuid())
+  organizationId  String
+  name            String?
+  description     String?
+  credentialFile  String?
+  createdAt       DateTime     @default(now())
+  updatedAt       DateTime     @updatedAt
+  googleAPIKey    String?
+  googleCSID      String?
+  weatherAPIKey   String?
+  wikipediaAPIKey String?
+  organization    Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+}
+
+model AuditLog {
+  id           String           @id @default(cuid())
+  userId       String?
+  userEmail    String?
+  userName     String?
+  action       String
+  details      Json?
+  ipAddress    String?
+  userAgent    String?
+  timestamp    DateTime         @default(now())
+  sessionId    String?
+  success      Boolean          @default(true)
+  errorMessage String?
+  chatId       String?
+  user         User?            @relation(fields: [userId], references: [id])
+  chat         ChatNewVersion?  @relation(fields: [chatId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([action])
+  @@index([timestamp])
+  @@index([ipAddress])
+  @@index([chatId])
+  @@map("audit_logs")
+}
+
+model ToolsOnAgent {
+  id             String       @id @default(cuid())
+  agentId        String
+  functionToolId String
+  createdAt      DateTime     @default(now())
+  updatedAt      DateTime     @updatedAt
+  agent          Agent        @relation(fields: [agentId], references: [id], onDelete: Cascade)
+  functionTool   FunctionTool @relation(fields: [functionToolId], references: [id], onDelete: Cascade)
+
+  @@unique([agentId, functionToolId])
+}
+
+model ApprovalRequest {
+  id                     String                   @id @default(cuid())
+  requesterId            String
+  processName            ProcessName              @default(APPROVAL_AGENT_ACCESS)
+  rejectRemark           String?
+  approveRemark          String?
+  status                 ApprovalStatus           @default(PENDING)
+  approvedById           String?
+  createdAt              DateTime                 @default(now())
+  updatedAt              DateTime                 @updatedAt
+  expiredAt              DateTime?
+  approvedAt             DateTime?
+  approvedBy             User?                    @relation("ApprovedBy", fields: [approvedById], references: [id])
+  requester              User                     @relation("Requester", fields: [requesterId], references: [id])
+  ApprovalRequestOnAgent ApprovalRequestOnAgent[]
+
+  @@index([requesterId])
+  @@index([approvedById])
+  @@index([status])
+}
+
+model ApprovalRequestOnAgent {
+  approvalRequestId String
+  agentId           String
+  agent             Agent           @relation(fields: [agentId], references: [id])
+  approvalRequest   ApprovalRequest @relation(fields: [approvalRequestId], references: [id])
+
+  @@id([approvalRequestId, agentId])
+}
+
+model langchain_pg_collection {
+  uuid                   String                   @id @db.Uuid
+  name                   String                   @unique @db.VarChar
+  cmetadata              Json?
+  langchain_pg_embedding langchain_pg_embedding[]
+
+  @@ignore
+}
+
+model langchain_pg_embedding {
+  id            String                  @id @db.VarChar
+  collection_id String                  @db.Uuid
+  embedding     Unsupported("vector")
+  document      String?                 @db.VarChar
+  cmetadata     Json?
+  collection    langchain_pg_collection @relation(fields: [collection_id], references: [uuid])
+
+  @@ignore
+}
+
+model Oauth2Config {
+  id             String             @id @default(cuid())
+  name           String
+  grantType      String
+  callbackUrl    String
+  authUrl        String
+  accessTokenUrl String
+  clientId       String
+  clientSecret   String
+  scope          String?
+  clientAuth     String
+  createdAt      DateTime           @default(now())
+  updatedAt      DateTime           @updatedAt
+  state          String?
+  authRequest    Json?
+  refreshRequest Json?
+  tokenRequest   Json?
+  refreshUrl     String?
+  connections    Oauth2Connection[] @relation("Oauth2Connection")
+}
+
+model Oauth2Connection {
+  id                 String       @id @default(cuid())
+  configId           String
+  externalId         String?
+  accessToken        String
+  refreshToken       String?
+  access_expires_at  DateTime?
+  refresh_expires_at DateTime?
+  binding_created_at DateTime?
+  binding_expired_at DateTime?
+  createdAt          DateTime     @default(now())
+  updatedAt          DateTime     @updatedAt
+  headerPrefix       String?
+  name               String?
+  config             Oauth2Config @relation("Oauth2Connection", fields: [configId], references: [id], onDelete: Cascade)
+}
+
+model alembic_version {
+  version_num String @id(map: "alembic_version_pkc") @db.VarChar(32)
+}
+
+model exchange_sessions {
+  id           String    @id(map: "sessions_pkey_1")
+  sessionToken String    @unique(map: "sessions_session_token_key_1")
+  userId       String?
+  expires      DateTime
+  createdAt    DateTime? @db.Timestamp(6)
+  updatedAt    DateTime? @db.Timestamp(6)
+  agentId      String?
+}
+
+enum UserRole {
+  user
+  admin
+  superadmin
+}
+
+enum ChatType {
+  user
+  assistant
+}
+
+enum MenuType {
+  MANAGE_USERS
+  CHATBOT
+  MANAGE_KNOWLEDGE
+  INVITE_USERS
+  MANAGE_PACKAGES
+  MANAGE_PAYMENTS
+  MANAGE_INVOICES
+  MANAGE_ORGANIZATION
+  MANAGE_ALL_ORGANIZATIONS
+  MANAGE_USERS_ACTIVATION
+  MANAGE_SETTINGS
+  MANAGE_ACL
+  MANAGE_AGENTS
+  MANAGE_INTEGRATIONS
+  DASHBOARD
+  MANAGE_CREDENTIALS
+}
+
+enum UserType {
+  REGULAR
+  TRIAL
+  PREMIUM
+}
+
+enum VisibilityType {
+  PUBLIC
+  PRIVATE
+  ORGANIZATION
+}
+
+enum ProcessName {
+  APPROVAL_AGENT_ACCESS
+  APPROVAL_KNOWLEDGE_ACCESS
+}
+
+enum ApprovalStatus {
+  PENDING
+  ACTIVE
+  REJECTED
+  EXPIRED
+  DISABLED
+}
+
+enum MessageRole {
+  user
+  assistant
+}
+
+enum FeedbackType {
+  like
+  dislike
+}

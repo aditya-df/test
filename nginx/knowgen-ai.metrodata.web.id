@@ -1,0 +1,54 @@
+    limit_req_zone $binary_remote_addr zone=mylimit:10m rate=10r/s;
+    
+    upstream nextjs {
+        server localhost:3001;
+    }
+
+    server {
+        # Redirect HTTP requests to HTTPS.
+        listen 80;
+        server_name knowgen-ai.metrodata.web.id;
+        return 301 https://$host$request_uri;
+    }
+
+    server {
+        listen 443 ssl; # managed by Certbot
+
+        server_name knowgen-ai.metrodata.web.id;
+        root /srv/public;
+        server_tokens off;
+
+        client_max_body_size 200M;
+        ssl_certificate /etc/letsencrypt/live/knowgen-ai.metrodata.web.id/fullchain.pem; # managed by Certbot
+        ssl_certificate_key /etc/letsencrypt/live/knowgen-ai.metrodata.web.id/privkey.pem; # managed by Certbot
+        include /etc/letsencrypt/options-ssl-nginx.conf; # managed by Certbot
+        ssl_dhparam /etc/letsencrypt/ssl-dhparams.pem; # managed by Certbot
+
+         proxy_max_temp_file_size 0;
+
+         chunked_transfer_encoding on;
+
+
+        location / {
+            try_files $uri $uri/ @nextjs;
+        }
+
+        location @nextjs {
+
+            limit_req zone=mylimit;
+            proxy_buffering off;
+            proxy_cache off;
+            proxy_set_header Connection '';
+            proxy_http_version 1.1;
+            proxy_read_timeout 24h;
+
+            proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+            proxy_set_header X-Forwarded-Proto https;
+            proxy_set_header X-Forwarded-Ssl on;
+            proxy_set_header Host $http_host;
+            proxy_redirect off;
+            proxy_pass http://nextjs;
+            proxy_cookie_path / "/; HTTPOnly; Secure";
+        }
+
+}
